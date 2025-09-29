@@ -24,9 +24,8 @@ const char* MQTT_BROKER = "broker.hivemq.com";
 const int MQTT_PORT = 1883;
 const char* MQTT_USER = "";
 const char* MQTT_PASSWORD = "";
-
 /* --- Tópicos MQTT --- */
-const char* TOPIC_SUBSCRIBE = "smartpatio/commands";
+const char* TOPIC_SUBSCRIBE = "smartpatio/commands/PATIO_001";
 const char* TOPIC_PUBLISH = "smartpatio/status";
 
 /* --- Definições de Hardware --- */
@@ -41,6 +40,20 @@ unsigned long lastBlinkTime = 0;
 int blinkState = 0;
 bool blinking = false;
 
+// Musical tone variables
+unsigned long lastToneTime = 0;
+int toneIndex = 0;
+bool shouldPlayTone = false;
+
+// Musical notes (frequencies in Hz) - Pop-style melody
+int melody[] = {659, 698, 784, 659, 523, 587, 659, 523}; // E5, F5, G5, E5, C5, D5, E5, C5 (pop-style melody)
+int melodyLength = 8;
+
+// PWM settings for volume control
+const int PWM_CHANNEL = 0;
+const int PWM_RESOLUTION = 8;
+int volumeLevel = 50; // Volume level (0-255, where 255 is max volume)
+
 Adafruit_NeoPixel neoPixel(1, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
@@ -51,6 +64,11 @@ void setup() {
   Serial.println("Iniciando...");
 
   pinMode(BUZZER_PIN, OUTPUT); // Inicializa pino do buzzer
+  
+  // Configure PWM for buzzer volume control
+  ledcSetup(PWM_CHANNEL, 1000, PWM_RESOLUTION); // 1000Hz base frequency
+  ledcAttachPin(BUZZER_PIN, PWM_CHANNEL);
+  
   neoPixel.begin();            // Inicializa NeoPixel
   neoPixel.show();
   Serial.println("- Hardware configurado");
@@ -84,7 +102,19 @@ void loop() {
       neoPixel.show();
       blinkState = (blinkState + 1) % 3;
     }
-    
+  }
+  
+  // Play musical tone pattern
+  if (shouldPlayTone) {
+    unsigned long now = millis();
+    if (now - lastToneTime > 400) { // Each note plays for 400ms
+      lastToneTime = now;
+      toneIndex = (toneIndex + 1) % melodyLength;
+      
+      // Use PWM for volume control instead of tone()
+      ledcWriteTone(PWM_CHANNEL, melody[toneIndex]);
+      ledcWrite(PWM_CHANNEL, volumeLevel); // Set volume level
+    }
   }
   
 }
@@ -201,7 +231,15 @@ void activateDevice() {
   blinking = true; // Inicia o piscar do NeoPixel
   blinkState = 0;
   lastBlinkTime = millis();
-  tone(BUZZER_PIN, 2000); // Ativa buzzer só uma vez
+  
+  // Start musical tone pattern
+  shouldPlayTone = true;
+  toneIndex = 0;
+  lastToneTime = millis();
+  
+  // Use PWM for volume control
+  ledcWriteTone(PWM_CHANNEL, melody[0]);
+  ledcWrite(PWM_CHANNEL, volumeLevel); // Set volume level
 }
 
 void deactivateDevice() {
@@ -209,7 +247,8 @@ void deactivateDevice() {
   publishStatus("DEVICE_DEACTIVATED");
 
   blinking = false; // Para o piscar do NeoPixel
-  noTone(BUZZER_PIN); // Desativa buzzer só uma vez
+  shouldPlayTone = false; // Stop musical tone
+  ledcWrite(PWM_CHANNEL, 0); // Turn off PWM (volume = 0)
   neoPixel.setPixelColor(0, neoPixel.Color(0, 255, 0)); // Verde indica inativo
   neoPixel.show();
 }
